@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "author": "Syed Taqeeulla",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "wokwi-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "board-ssd1306", "id": "oled", "top": -150, "left": 120, "attrs": { "i2cAddress": "0x3c" } },
+    { "type": "wokwi-dht22", "id": "dht", "top": 150, "left": -150, "attrs": {} },
+    { "type": "wokwi-potentiometer", "id": "pot", "top": 150, "left": 150, "attrs": {} },
+    { "type": "wokwi-pushbutton", "id": "btn_sos", "top": -150, "left": -150, "attrs": { "color": "red" } },
+    { "type": "wokwi-buzzer", "id": "buzzer", "top": 0, "left": 250, "attrs": { "volume": "0.1" } },
+    { "type": "wokwi-led", "id": "led_alarm", "top": -80, "left": 250, "attrs": { "color": "red" } }
+  ],
+  "connections": [
+    [ "oled:GND", "esp:GND.1", "black", [] ],
+    [ "oled:VCC", "esp:3V3", "red", [] ],
+    [ "oled:SDA", "esp:D21", "blue", [] ],
+    [ "oled:SCL", "esp:D22", "yellow", [] ],
+    [ "dht:GND", "esp:GND.1", "black", [] ],
+    [ "dht:VCC", "esp:3V3", "red", [] ],
+    [ "dht:SDA", "esp:D15", "green", [] ],
+    [ "pot:GND", "esp:GND.1", "black", [] ],
+    [ "pot:VCC", "esp:3V3", "red", [] ],
+    [ "pot:SIG", "esp:D34", "orange", [] ],
+    [ "btn_sos:1.N", "esp:GND.1", "black", [] ],
+    [ "btn_sos:2.N", "esp:D4", "purple", [] ],
+    [ "buzzer:1", "esp:GND.1", "black", [] ],
+    [ "buzzer:2", "esp:D25", "red", [] ],
+    [ "led_alarm:C", "esp:GND.1", "black", [] ],
+    [ "led_alarm:A", "esp:D26", "red", [] ]
+  ]
+}
