@@ -25,16 +25,17 @@ A real-time medical patient monitoring system built on ESP32 running **FreeRTOS*
 
 ---
 
-## 💻 Simulation & Testing
+## 💻 Simulation & Step-by-Step Instructions
 
-This project can be simulated directly on **Wokwi**:
+To run this simulation on **Wokwi**:
 
-1. Open [Wokwi.com](https://wokwi.com/projects/new/esp32)
-2. Load `sketch.ino` / `src/main.cpp` and `diagram.json`
-3. Click **Play ▶️** to run the multi-tasking FreeRTOS kernel in real-time.
+1. Open [Wokwi.com ESP32 Project](https://wokwi.com/projects/new/esp32)
+2. Copy `diagram.json` into Wokwi's `diagram.json` tab.
+3. Copy `src/main.cpp` into Wokwi's `sketch.ino` tab.
+4. Click **Play ▶️** to run the FreeRTOS kernel in real-time!
 
 ---
 
 ## 📜 License
 
-Distributed under the MIT License. See `LICENSE` for more details.
+Distributed under the MIT License. See `LICENSE` for details.
