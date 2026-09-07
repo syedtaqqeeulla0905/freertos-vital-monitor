@@ -4,22 +4,26 @@
 #include <Adafruit_SSD1306.h>
 #include <DHT.h>
 
-// Pin Definitions
-#define PIN_DHT          15
-#define PIN_PULSE_POT    34
-#define PIN_SOS_BTN      4
-#define PIN_BUZZER       25
-#define PIN_LED_ALARM    26
+// ====================================================
+// Hardware Pin Definitions
+// ====================================================
+#define PIN_DHT          15   // DHT22 Temperature & Humidity Sensor
+#define PIN_PULSE_POT    34   // Potentiometer simulating Heart Rate (ADC1_CH6)
+#define PIN_SOS_BTN      4    // Emergency Push Button (Hardware ISR Trigger)
+#define PIN_BUZZER       25   // Piezo Alarm Buzzer
+#define PIN_LED_ALARM    26   // Red Emergency Warning LED
 #define DHTTYPE          DHT22
 
 #define SCREEN_WIDTH     128
 #define SCREEN_HEIGHT    64
 
-// Display & Sensor Objects
+// Display & Sensor Instantiations
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 DHT dht(PIN_DHT, DHTTYPE);
 
-// FreeRTOS Data Struct
+// ====================================================
+// FreeRTOS Data Structs & Synchronization Primitives
+// ====================================================
 struct VitalData {
   float temperature;
   float humidity;
@@ -27,31 +31,36 @@ struct VitalData {
   bool isAlert;
 };
 
-// FreeRTOS Synchronization Primitives
-QueueHandle_t      xSensorQueue;
-SemaphoreHandle_t  xSOSSemaphore;
-SemaphoreHandle_t  xI2CMutex;
+// FreeRTOS Handles
+QueueHandle_t      xSensorQueue;   // Thread-safe FIFO Queue for VitalData structs
+SemaphoreHandle_t  xSOSSemaphore;  // Binary Semaphore given by Hardware ISR
+SemaphoreHandle_t  xI2CMutex;      // Mutex to protect shared I2C bus (SSD1306 display)
 
-// Hardware ISR for Emergency SOS Button
+// ====================================================
+// Hardware Interrupt Service Routine (ISR)
+// ====================================================
+// Triggered on GPIO 4 Falling Edge when SOS Button is pressed
 void IRAM_ATTR sosButtonISR() {
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  // Unblock Emergency Task from ISR safely
   xSemaphoreGiveFromISR(xSOSSemaphore, &xHigherPriorityTaskWoken);
   portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-// ----------------------------------------------------
-// Task 1: High-Priority Emergency SOS Handler
-// ----------------------------------------------------
+// ====================================================
+// Task 1: Emergency SOS Handler (Priority 4 - Highest)
+// ====================================================
 void TaskEmergencyAlert(void *pvParameters) {
   for (;;) {
+    // Block indefinitely until Binary Semaphore is given by Hardware ISR
     if (xSemaphoreTake(xSOSSemaphore, portMAX_DELAY) == pdTRUE) {
-      Serial.println("[ISR EMERGENCY] SOS Button Pressed!");
+      Serial.println("[ISR EMERGENCY] SOS Alarm Triggered!");
       
-      // Trigger Alarm Pattern
+      // Execute 5x Emergency Flashing & Beeping Alarm Sequence
       for (int i = 0; i < 5; i++) {
         digitalWrite(PIN_LED_ALARM, HIGH);
         digitalWrite(PIN_BUZZER, HIGH);
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(100)); // Sleep 100ms without blocking CPU
         digitalWrite(PIN_LED_ALARM, LOW);
         digitalWrite(PIN_BUZZER, LOW);
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -60,40 +69,42 @@ void TaskEmergencyAlert(void *pvParameters) {
   }
 }
 
-// ----------------------------------------------------
-// Task 2: Sensor Sampling Task (Reads DHT22 & ADC)
-// ----------------------------------------------------
+// ====================================================
+// Task 2: Sensor Sampling Task (Priority 2 - Medium)
+// ====================================================
 void TaskSensorRead(void *pvParameters) {
   for (;;) {
     VitalData data;
     
-    // Read Temperature & Humidity
+    // 1. Read DHT22 Sensor
     data.temperature = dht.readTemperature();
     data.humidity = dht.readHumidity();
     
-    // Map ADC Potentiometer to Heart Rate (40 to 160 BPM)
+    // 2. Sample ADC & Map Potentiometer value (0-4095) to Heart Rate (40-160 BPM)
     int rawAdc = analogRead(PIN_PULSE_POT);
     data.heartRate = map(rawAdc, 0, 4095, 40, 160);
     
-    // Check threshold alert (Fever > 38C, Abnormal Pulse < 50 or > 120 BPM)
+    // 3. Threshold Check (Fever > 38C, Abnormal Heart Rate < 50 or > 120 BPM)
     data.isAlert = (data.heartRate > 120 || data.heartRate < 50 || data.temperature > 38.0);
 
-    // Send struct to Queue
+    // 4. Push data struct to FreeRTOS Queue (Non-blocking write)
     xQueueSend(xSensorQueue, &data, pdMS_TO_TICKS(100));
 
-    vTaskDelay(pdMS_TO_TICKS(1000)); // Sample every 1 sec
+    // 5. Yield execution for 1000ms
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
-// ----------------------------------------------------
-// Task 3: Data Processing & OLED UI Task
-// ----------------------------------------------------
+// ====================================================
+// Task 3: Data Processing & OLED Display Task (Priority 1)
+// ====================================================
 void TaskOLEDUpdate(void *pvParameters) {
   VitalData currentVitals;
   for (;;) {
+    // Wait for incoming sensor packet from Queue
     if (xQueueReceive(xSensorQueue, &currentVitals, portMAX_DELAY) == pdTRUE) {
       
-      // Thread-safe access to I2C OLED display using Mutex
+      // Acquire I2C Mutex before accessing shared SSD1306 Display
       if (xSemaphoreTake(xI2CMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         display.clearDisplay();
         display.setTextSize(1);
@@ -121,12 +132,16 @@ void TaskOLEDUpdate(void *pvParameters) {
         }
         display.display();
         
+        // Release I2C Mutex for other tasks
         xSemaphoreGive(xI2CMutex);
       }
     }
   }
 }
 
+// ====================================================
+// System Setup & FreeRTOS Kernel Initialization
+// ====================================================
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_SOS_BTN, INPUT_PULLUP);
@@ -136,23 +151,23 @@ void setup() {
   dht.begin();
   
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("SSD1306 Allocation Failed");
+    Serial.println("SSD1306 OLED Initialization Failed!");
   }
 
-  // Create FreeRTOS Primitives
+  // 1. Initialize FreeRTOS Queues, Mutexes, and Binary Semaphores
   xSensorQueue  = xQueueCreate(5, sizeof(VitalData));
   xSOSSemaphore = xSemaphoreCreateBinary();
   xI2CMutex     = xSemaphoreCreateMutex();
 
-  // Attach Hardware Interrupt
+  // 2. Attach Hardware Interrupt on GPIO 4 Falling Edge
   attachInterrupt(digitalPinToInterrupt(PIN_SOS_BTN), sosButtonISR, FALLING);
 
-  // Create FreeRTOS Tasks
-  xTaskCreate(TaskEmergencyAlert, "EmergencyTask", 2048, NULL, 4, NULL);
-  xTaskCreate(TaskSensorRead,     "SensorReadTask", 2048, NULL, 2, NULL);
-  xTaskCreate(TaskOLEDUpdate,     "OLEDTask",       3072, NULL, 1, NULL);
+  // 3. Register & Launch FreeRTOS Tasks with Specific Priorities
+  xTaskCreate(TaskEmergencyAlert, "EmergencyTask", 2048, NULL, 4, NULL); // Priority 4 (Highest)
+  xTaskCreate(TaskSensorRead,     "SensorReadTask", 2048, NULL, 2, NULL); // Priority 2 (Medium)
+  xTaskCreate(TaskOLEDUpdate,     "OLEDTask",       3072, NULL, 1, NULL); // Priority 1 (Normal)
 }
 
 void loop() {
-  // Empty - FreeRTOS handles task execution
+  // Empty: FreeRTOS Scheduler handles all task execution
 }
